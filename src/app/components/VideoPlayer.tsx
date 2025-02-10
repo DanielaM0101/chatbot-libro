@@ -16,11 +16,11 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ videoId }) => {
     },
   }
 
-  const isValidVideoId = (id: string): boolean => {
+  const isValidVideoId = (id: string | null): boolean => {
     if (!id || typeof id !== 'string') return false;
-    if (id === 'NULL' || id === 'EMPTY') return false;
-    return id.length >= 11 && id.length <= 12;
-  }
+    if (id.trim() === '' || id === 'NULL' || id === 'EMPTY') return false;
+    return /^[a-zA-Z0-9_-]{11}$/.test(id);
+  };
 
   if (!isValidVideoId(videoId)) {
     return (

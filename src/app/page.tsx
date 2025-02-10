@@ -31,11 +31,11 @@ export default function ChatBot() {
   const [isLoading, setIsLoading] = useState(false)
   const [history, setHistory] = useState<HistoryItem[]>([])
   const [isHistoryVisible, setIsHistoryVisible] = useState(false)
+  const preguntaRealizada = messages.some((message) => message.role === 'user')
   const [isDashboardVisible, setIsDashboardVisible] = useState(false)
   const [stats, setStats] = useState({
     totalQuestions: 0,
     totalResponses: 0,
-    averageResponseTime: 0,
     questionsByCategory: [] as { name: string; value: number }[],
   })
 
@@ -84,8 +84,6 @@ export default function ChatBot() {
     setError(null)
     setIsLoading(true)
 
-    const startTime = Date.now()
-
     try {
       const response = await fetch('/api/chat', {
         method: 'POST',
@@ -104,12 +102,9 @@ export default function ChatBot() {
       const relatedToFirstAid = determineCategory(input, data.content) !== 'Otros'
 
       setMessages((prevMessages) => [...prevMessages, { role: 'assistant', content: data.content }])
-      setVideoId(relatedToFirstAid ? data.videoId : null)
+      setVideoId(relatedToFirstAid && data.videoId ? data.videoId : null)
 
-      const endTime = Date.now()
-      const responseTime = (endTime - startTime) / 1000 
-
-      updateStats(input, data.content, responseTime)
+      updateStats(input, data.content)
 
       const now = Date.now()
       setHistory((prevHistory) => [
@@ -137,17 +132,13 @@ export default function ChatBot() {
     }
   }
 
-  const updateStats = (newQuestion: string, newAnswer: string, responseTime: number) => {
+  const updateStats = (newQuestion: string, newAnswer: string) => {
     setStats((prevStats) => {
       const totalQuestions = prevStats.totalQuestions + 1
       const totalResponses = prevStats.totalResponses + 1
-      const totalResponseTime = prevStats.averageResponseTime * prevStats.totalResponses + responseTime
-      const averageResponseTime = totalResponseTime / totalResponses
 
-     
       const category = determineCategory(newQuestion, newAnswer)
 
-      
       const updatedQuestionsByCategory = [...prevStats.questionsByCategory]
       const categoryIndex = updatedQuestionsByCategory.findIndex((item) => item.name === category)
       if (categoryIndex !== -1) {
@@ -159,7 +150,6 @@ export default function ChatBot() {
       return {
         totalQuestions,
         totalResponses,
-        averageResponseTime,
         questionsByCategory: updatedQuestionsByCategory,
       }
     })
@@ -192,14 +182,39 @@ export default function ChatBot() {
   
   const handleHistoryClick = (item: HistoryItem) => {
     setMessages([{ role: 'user', content: item.question }, { role: 'assistant', content: item.answer }])
-    setVideoId(item.videoId)
+    setVideoId(item.videoId || null)
     setIsHistoryVisible(false)
   }
   
   const handleDeleteHistoryItem = (index: number) => {
-    setHistory((prevHistory) => prevHistory.filter((_, i) => i !== index))
+    const itemToDelete = history[index];
+    setHistory((prevHistory) => prevHistory.filter((_, i) => i !== index));
+    updateStatsOnDelete(itemToDelete);
   }
-  
+
+  const normalizeCategory = (category: string) => category.trim().toLowerCase()
+  const updateStatsOnDelete = (item: HistoryItem) => {
+    setStats((prevStats) => {
+      const totalQuestions = prevStats.totalQuestions - 1;
+      const totalResponses = prevStats.totalResponses - 1;
+
+      const normalizedCategory = normalizeCategory(item.category);
+      const updatedQuestionsByCategory = prevStats.questionsByCategory.filter((cat) => normalizeCategory(cat.name) !== normalizedCategory || cat.value > 1);
+
+      const categoryIndex = updatedQuestionsByCategory.findIndex((cat) => normalizeCategory(cat.name) === normalizedCategory);
+      if (categoryIndex !== -1) {
+        updatedQuestionsByCategory[categoryIndex].value -= 1;
+      }
+
+      return {
+        totalQuestions,
+        totalResponses,
+        questionsByCategory: updatedQuestionsByCategory,
+      };
+    });
+  };
+
+
   return (
     <div className="min-h-screen bg-blue-100">
       <header className="bg-white shadow-md p-4 sticky top-0 z-50">
@@ -301,14 +316,16 @@ export default function ChatBot() {
                 <h2 className="text-white font-medium text-lg">Video Demostrativo</h2>
               </div>
               <div className="p-4">
-                {videoId ? (
+                {videoId && videoId !== "NULL" && videoId !== "EMPTY" ? (
                   <div className="aspect-video rounded-xl overflow-hidden shadow-lg">
                     <VideoPlayer videoId={videoId} />
                   </div>
                 ) : (
                   <div className="aspect-video flex flex-col items-center justify-center border-2 border-dashed border-gray-200 rounded-xl text-gray-500 bg-gray-50">
                     <img src="/imagenes/bermal-logo.png" alt="Bermal Logo" className="w-16 h-16 mb-4 opacity-50" />
-                    <p className="text-center">Haz una pregunta para ver un video relacionado</p>
+                    <p className="text-center">
+                    {preguntaRealizada ? "No hay video demostrativo disponible para este tema." : "Haz una pregunta para ver un video relacionado."}
+                    </p>
                   </div>
                 )}
               </div>
@@ -351,4 +368,4 @@ export default function ChatBot() {
       )}
     </div>
   )
-  }
+}
