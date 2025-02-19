@@ -1,61 +1,33 @@
-import type React from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
+import React from 'react';
 
 interface DashboardPanelProps {
   totalQuestions: number;
   totalResponses: number;
-  questionsByCategory: { name: string; value: number }[];
+  questionsByCategory: Array<{ name: string; value: number }>;
 }
 
-const DashboardPanel: React.FC<DashboardPanelProps> = ({
-  totalQuestions,
-  totalResponses,
-  questionsByCategory,
-}) => {
+const DashboardPanel: React.FC<DashboardPanelProps> = ({ totalQuestions, totalResponses, questionsByCategory }) => {
   return (
-    <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3 p-6">
-      <Card className="bg-gradient-to-br from-[#0088D1] to-[#0077BE] text-white">
-        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-          <CardTitle className="text-lg font-medium">Total Preguntas</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="text-4xl font-bold">{totalQuestions}</div>
-          <p className="text-blue-100 mt-2">Consultas realizadas</p>
-        </CardContent>
-      </Card>
-      <Card className="bg-gradient-to-br from-[#E23B30] to-[#C62828] text-white">
-        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-          <CardTitle className="text-lg font-medium">Total Respuestas</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="text-4xl font-bold">{totalResponses}</div>
-          <p className="text-red-100 mt-2">Respuestas proporcionadas</p>
-        </CardContent>
-      </Card>
-      <Card className="bg-white col-span-4 shadow-lg">
-        <CardHeader className="border-b border-gray-100">
-          <CardTitle className="text-[#0088D1] text-xl">Estadísticas por Categoría</CardTitle>
-        </CardHeader>
-        <CardContent className="pt-6">
-          <ResponsiveContainer width="100%" height={300}>
-            <BarChart data={questionsByCategory}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#eee" />
-              <XAxis dataKey="name" tick={{ fill: "#666" }} axisLine={{ stroke: "#ddd" }} />
-              <YAxis tick={{ fill: "#666" }} axisLine={{ stroke: "#ddd" }} />
-              <Tooltip
-                contentStyle={{
-                  backgroundColor: "white",
-                  border: "1px solid #ddd",
-                  borderRadius: "8px",
-                }}
-              />
-              <Legend />
-              <Bar dataKey="value" fill="#0088D1" radius={[4, 4, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        </CardContent>
-      </Card>
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+      <div className="bg-gradient-to-r from-blue-500 to-blue-700 p-6 rounded-lg shadow-lg text-white">
+        <h3 className="text-lg font-semibold">Total de Preguntas</h3>
+        <p className="text-3xl font-bold">{totalQuestions}</p>
+      </div>
+      <div className="bg-gradient-to-r from-green-500 to-green-700 p-6 rounded-lg shadow-lg text-white">
+        <h3 className="text-lg font-semibold">Total de Respuestas</h3>
+        <p className="text-3xl font-bold">{totalResponses}</p>
+      </div>
+      <div className="bg-white p-6 rounded-lg shadow-lg col-span-1 sm:col-span-2">
+        <h3 className="text-lg font-semibold text-gray-800">Preguntas por Categoría</h3>
+        <ul className="mt-4 space-y-4">
+          {questionsByCategory.map((category, index) => (
+            <li key={index} className="flex justify-between items-center bg-gray-100 p-3 rounded-lg shadow-sm">
+              <span className="text-gray-700 font-medium">{category.name}</span>
+              <span className="text-xl font-bold text-blue-600">{category.value}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
     </div>
   );
 };

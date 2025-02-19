@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { Button } from './components/ui/button'
 import { Input } from './components/ui/input'
-import { RotateCw, Send, MessageCircle, Trash2, History, BarChart2 } from 'lucide-react'
+import { RotateCw, Send, MessageCircle, Trash2, History, BarChart2, Volume2 } from 'lucide-react'
 import VideoPlayer from './components/VideoPlayer'
 import ReactMarkdown from 'react-markdown'
 import DashboardPanel from './components/DashboardPanel'
@@ -21,7 +21,13 @@ interface HistoryItem {
   category: string
 }
 
-const HISTORY_EXPIRATION_TIME = 7 * 24 * 60 * 60 * 1000 
+interface Stats {
+  totalQuestions: number
+  totalResponses: number
+  questionsByCategory: Array<{ name: string; value: number }>
+}
+
+const HISTORY_EXPIRATION_TIME = 7 * 24 * 60 * 60 * 1000
 
 export default function ChatBot() {
   const [messages, setMessages] = useState<Message[]>([])
@@ -33,11 +39,36 @@ export default function ChatBot() {
   const [isHistoryVisible, setIsHistoryVisible] = useState(false)
   const preguntaRealizada = messages.some((message) => message.role === 'user')
   const [isDashboardVisible, setIsDashboardVisible] = useState(false)
-  const [stats, setStats] = useState({
+  const [stats, setStats] = useState<Stats>({
     totalQuestions: 0,
     totalResponses: 0,
-    questionsByCategory: [] as { name: string; value: number }[],
+    questionsByCategory: [],
   })
+  const [isSpeaking, setIsSpeaking] = useState(false)
+  const [currentUtterance, setCurrentUtterance] = useState<SpeechSynthesisUtterance | null>(null)
+  const [selectedVoice, setSelectedVoice] = useState<SpeechSynthesisVoice | null>(null)
+  const [isPaused, setIsPaused] = useState(false)
+  const [isHeaderVisible, setIsHeaderVisible] = useState(true) // Estado para controlar la visibilidad del encabezado
+  const [lastScrollY, setLastScrollY] = useState(0) // Estado para almacenar la posición de desplazamiento anterior
+
+  useEffect(() => {
+    const handleScroll = () => {
+      const currentScrollY = window.scrollY
+      if (currentScrollY > lastScrollY) {
+        // Desplazándose hacia abajo
+        setIsHeaderVisible(false)
+      } else {
+        // Desplazándose hacia arriba
+        setIsHeaderVisible(true)
+      }
+      setLastScrollY(currentScrollY)
+    }
+
+    window.addEventListener('scroll', handleScroll)
+    return () => {
+      window.removeEventListener('scroll', handleScroll)
+    }
+  }, [lastScrollY])
 
   useEffect(() => {
     const storedHistory = localStorage.getItem('chatHistory')
@@ -62,8 +93,8 @@ export default function ChatBot() {
       }
     }
 
-    
-    setMessages([{ role: 'assistant', content: 'Hola, mi nombre es Bermal. Soy tu asistente de primeros auxilios. ¿En qué puedo ayudarte hoy?' }])
+    setMessages([{ role: 'assistant', content: 'Hola, soy Bermal. Tu asistente médico personal. ¿En qué puedo ayudarte hoy?' }])
+    loadVoices()
   }, [])
 
   useEffect(() => {
@@ -73,6 +104,44 @@ export default function ChatBot() {
   useEffect(() => {
     localStorage.setItem('chatStats', JSON.stringify(stats))
   }, [stats])
+
+  const loadVoices = () => {
+    const voices = window.speechSynthesis.getVoices()
+    const selected = voices.find(voice => voice.name === 'Google español de Estados Unidos')
+    setSelectedVoice(selected || voices[0])
+  }
+
+  const speakText = (text: string) => {
+    if (isSpeaking && !isPaused) {
+      window.speechSynthesis.pause()
+      setIsPaused(true)
+      return
+    }
+
+    if (isSpeaking && isPaused) {
+      window.speechSynthesis.resume()
+      setIsPaused(false)
+      return
+    }
+
+    window.speechSynthesis.cancel()
+    const cleanedText = text.replace(/[.,[\]#]/g, '')
+    const utterance = new SpeechSynthesisUtterance(cleanedText)
+    utterance.lang = 'es-ES'
+    utterance.rate = 0.8
+    utterance.pitch = 1.0
+    if (selectedVoice) {
+      utterance.voice = selectedVoice
+    }
+    utterance.onend = () => {
+      setIsSpeaking(false)
+      setCurrentUtterance(null)
+      setIsPaused(false)
+    }
+    window.speechSynthesis.speak(utterance)
+    setIsSpeaking(true)
+    setCurrentUtterance(utterance)
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -99,7 +168,8 @@ export default function ChatBot() {
         throw new Error(data.error || 'Error en la respuesta del servidor')
       }
 
-      const relatedToFirstAid = determineCategory(input, data.content) !== 'Otros'
+      const category = determineCategory(input, data.content)
+      const relatedToFirstAid = category !== 'Otros'
 
       setMessages((prevMessages) => [...prevMessages, { role: 'assistant', content: data.content }])
       setVideoId(relatedToFirstAid && data.videoId ? data.videoId : null)
@@ -114,7 +184,7 @@ export default function ChatBot() {
           answer: data.content,
           timestamp: now,
           videoId: relatedToFirstAid ? data.videoId : null,
-          category: data.category || 'General',
+          category: category,
         },
       ])
     } catch (error) {
@@ -167,8 +237,48 @@ export default function ChatBot() {
     return 'Otros'
   }
 
+  const updateStatsOnDelete = (item: HistoryItem) => {
+    setStats((prevStats) => {
+      const totalQuestions = Math.max(0, prevStats.totalQuestions - 1)
+      const totalResponses = Math.max(0, prevStats.totalResponses - 1)
+
+      const category = determineCategory(item.question, item.answer)
+      let updatedQuestionsByCategory = [...prevStats.questionsByCategory]
+
+      // Find the category in the current stats
+      const categoryIndex = updatedQuestionsByCategory.findIndex(cat => cat.name === category)
+
+      if (categoryIndex !== -1) {
+        // Update the count for the category
+        updatedQuestionsByCategory[categoryIndex] = {
+          ...updatedQuestionsByCategory[categoryIndex],
+          value: Math.max(0, updatedQuestionsByCategory[categoryIndex].value - 1)
+        }
+
+        // Remove the category if its value is 0
+        updatedQuestionsByCategory = updatedQuestionsByCategory.filter(cat => cat.value > 0)
+      }
+
+      return {
+        totalQuestions,
+        totalResponses,
+        questionsByCategory: updatedQuestionsByCategory,
+      }
+    })
+  }
+
+  const handleDeleteHistoryItem = (index: number) => {
+    const itemToDelete = history[index]
+    setHistory((prevHistory) => prevHistory.filter((_, i) => i !== index))
+    updateStatsOnDelete(itemToDelete)
+  }
+
   const handleClearChat = () => {
-    setMessages([{ role: 'assistant', content: 'Hola, mi nombre es Bermal. Soy tu asistente de primeros auxilios. ¿En qué puedo ayudarte hoy?' }])
+    window.speechSynthesis.cancel()
+    setIsSpeaking(false)
+    setCurrentUtterance(null)
+    setIsPaused(false)
+    setMessages([{ role: 'assistant', content: 'Hola, soy Bermal. Tu asistente médico personal. ¿En qué puedo ayudarte hoy?' }])
     setVideoId(null)
   }
 
@@ -177,154 +287,184 @@ export default function ChatBot() {
   }
 
   const toggleDashboard = () => {
-    setIsDashboardVisible(!isDashboardVisible)
+    setIsDashboardVisible((prev) => !prev)
   }
-  
+
   const handleHistoryClick = (item: HistoryItem) => {
     setMessages([{ role: 'user', content: item.question }, { role: 'assistant', content: item.answer }])
     setVideoId(item.videoId || null)
     setIsHistoryVisible(false)
   }
-  
-  const handleDeleteHistoryItem = (index: number) => {
-    const itemToDelete = history[index];
-    setHistory((prevHistory) => prevHistory.filter((_, i) => i !== index));
-    updateStatsOnDelete(itemToDelete);
-  }
-
-  const normalizeCategory = (category: string) => category.trim().toLowerCase()
-  const updateStatsOnDelete = (item: HistoryItem) => {
-    setStats((prevStats) => {
-      const totalQuestions = prevStats.totalQuestions - 1;
-      const totalResponses = prevStats.totalResponses - 1;
-
-      const normalizedCategory = normalizeCategory(item.category);
-      const updatedQuestionsByCategory = prevStats.questionsByCategory.filter((cat) => normalizeCategory(cat.name) !== normalizedCategory || cat.value > 1);
-
-      const categoryIndex = updatedQuestionsByCategory.findIndex((cat) => normalizeCategory(cat.name) === normalizedCategory);
-      if (categoryIndex !== -1) {
-        updatedQuestionsByCategory[categoryIndex].value -= 1;
-      }
-
-      return {
-        totalQuestions,
-        totalResponses,
-        questionsByCategory: updatedQuestionsByCategory,
-      };
-    });
-  };
-
 
   return (
     <div className="min-h-screen bg-blue-100">
-      <header className="bg-white shadow-md p-4 sticky top-0 z-50">
-        <div className="max-w-7xl mx-auto flex items-center justify-between">
-          <div className="flex items-center gap-6">
-            <img src="imagenes/tec-logo.jpg" alt="TEC Logo" className="h-14 w-auto" />
-            <div className="h-8 w-px bg-gray-200" />
+      {/* Header responsivo */}
+      <header className={`bg-white shadow-md p-2 sm:p-4 sticky top-0 z-50 transition-transform duration-300 ${isHeaderVisible ? 'translate-y-0' : '-translate-y-full'}`}>
+        <div className="max-w-7xl mx-auto">
+          {/* Header para móviles */}
+          <div className="flex flex-col gap-3 sm:hidden">
+            <div className="flex items-center justify-between">
+              <img src="imagenes/tec-logo.jpg" alt="TEC Logo" className="h-10 w-auto" />
+              <Button
+                onClick={toggleDashboard}
+                className="bg-[#329fda] hover:bg-[#0077BE] text-white rounded-full shadow-md"
+              >
+                <BarChart2 className="w-5 h-5" />
+              </Button>
+            </div>
+            <div className="flex gap-2 justify-center">
+              <Button
+                onClick={handleClearChat}
+                className="bg-red-500 hover:bg-red-600 text-white rounded-full shadow-md flex items-center gap-1 text-sm px-3"
+              >
+                <Trash2 className="w-4 h-4" />
+                Borrar
+              </Button>
+              <Button
+                onClick={toggleHistory}
+                className="bg-gray-500 hover:bg-gray-600 text-white rounded-full shadow-md flex items-center gap-1 text-sm px-3"
+              >
+                <History className="w-4 h-4" />
+                Historial
+              </Button>
+            </div>
           </div>
-          <Button onClick={toggleDashboard} className="bg-[#329fda] hover:bg-[#0077BE] text-white rounded-full shadow-md">
-            <BarChart2 className="w-5 h-5 mr-2" />
-            Dashboard
-          </Button>
+
+          {/* Header para desktop */}
+          <div className="hidden sm:flex items-center justify-between">
+            <div className="flex items-center gap-6">
+              <img src="imagenes/tec-logo.jpg" alt="TEC Logo" className="h-14 w-auto" />
+              <div className="h-8 w-px bg-gray-200" />
+            </div>
+            <div className="flex gap-3">
+              <Button
+                onClick={handleClearChat}
+                className="bg-red-500 hover:bg-red-600 text-white rounded-full shadow-md flex items-center gap-2"
+              >
+                <Trash2 className="w-5 h-5" />
+                Borrar Chat
+              </Button>
+              <Button
+                onClick={toggleHistory}
+                className="bg-gray-500 hover:bg-gray-600 text-white rounded-full shadow-md flex items-center gap-2"
+              >
+                <History className="w-5 h-5" />
+                Historial
+              </Button>
+              <Button
+                onClick={toggleDashboard}
+                className="bg-[#329fda] hover:bg-[#0077BE] text-white rounded-full shadow-md flex items-center gap-2"
+              >
+                <BarChart2 className="w-5 h-5" />
+                Dashboard
+              </Button>
+            </div>
+          </div>
         </div>
       </header>
-  
-      <main className="max-w-7xl mx-auto p-4">
+
+      <main className="max-w-7xl mx-auto p-2 sm:p-4">
         {isDashboardVisible ? (
           <>
-            <div className="mb-6 flex items-center justify-between">
+            <div className="mb-4 sm:mb-6 flex items-center justify-between">
               <div>
-                <h2 className="text-2xl font-bold text-[#329fda]">Panel de Control</h2>
-                <p className="text-gray-600">Estadísticas del sistema de ayuda</p>
-                <img src=" /imagenes/bermal-logo.png" alt="Bermal" className='w-10 h-10' />
+                <h2 className="text-xl sm:text-2xl font-bold text-[#329fda]">Panel de Control</h2>
+                <p className="text-sm sm:text-base text-gray-600">Estadísticas del sistema de ayuda</p>
+                <img src="/imagenes/bermal-logo.png" alt="Bermal" className="w-8 h-8 sm:w-10 sm:h-10" />
               </div>
             </div>
-            <DashboardPanel {...stats} />
+            <div className="bg-white rounded-2xl sm:rounded-3xl shadow-lg border border-gray-200 p-4 sm:p-6">
+              <DashboardPanel {...stats} />
+            </div>
           </>
         ) : (
-          <div className="flex flex-col lg:flex-row gap-6">
-            <div className="flex-1 bg-white rounded-3xl shadow-lg border border-gray-200 overflow-hidden">
-              <div className="bg-[#329fda] p-4 flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <img src="/imagenes/bermal-logo.png" alt="Bermal Icon" className="w-8 h-8" />
-                  <h2 className="text-white font-medium text-lg">Ayuda Bermal</h2>
+          <div className="flex flex-col lg:flex-row gap-4 sm:gap-6">
+            {/* Chat container */}
+            <div className="flex-1 bg-white rounded-2xl sm:rounded-3xl shadow-lg border border-gray-200 overflow-hidden">
+              <div className="bg-[#329fda] p-3 sm:p-4 flex items-center justify-between">
+                <div className="flex items-center gap-2 sm:gap-3">
+                  <img src="/imagenes/bermal-logo.png" alt="Bermal Icon" className="w-6 h-6 sm:w-8 sm:h-8" />
+                  <h2 className="text-white font-medium text-base sm:text-lg">Ayuda Bermal</h2>
                 </div>
               </div>
-  
-              <div className="p-4 flex flex-col h-[700px]">
-                <div className="flex items-center gap-3 mb-6">
+
+              <div className="p-2 sm:p-4 flex flex-col h-[500px] sm:h-[700px]">
+                <div className="flex items-center gap-2 sm:gap-3 mb-4 sm:mb-6">
                   <div className="bg-[#329fda]/10 p-2 rounded-xl">
-                    <MessageCircle className="w-6 h-6 text-[#329fda]" />
+                    <MessageCircle className="w-5 h-5 sm:w-6 sm:h-6 text-[#329fda]" />
                   </div>
-                  <h3 className="text-xl font-semibold text-gray-800">Conversación</h3>
+                  <h3 className="text-lg sm:text-xl font-semibold text-gray-800">Conversación</h3>
                 </div>
-  
-                <div className="flex-1 overflow-auto mb-4 space-y-4 p-4">
+
+                {/* Chat messages */}
+                <div className="flex-1 overflow-auto mb-4 space-y-3 sm:space-y-4 p-2 sm:p-4">
                   {messages.map((m, index) => (
                     <div key={index} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                       <div
-                        className={`max-w-[80%] p-3 rounded-2xl ${
-                          m.role === 'user' ? 'bg-[#329fda] text-white' : 'bg-gray-100 text-gray-800'
-                        }`}
+                        className={`max-w-[85%] sm:max-w-[80%] p-2 sm:p-3 rounded-xl sm:rounded-2xl ${m.role === 'user' ? 'bg-[#329fda] text-white' : 'bg-gray-100 text-gray-800'
+                          }`}
                       >
                         {m.role === 'user' ? (
                           m.content
                         ) : (
-                          <ReactMarkdown className="prose prose-sm max-w-none">{m.content}</ReactMarkdown>
+                          <ReactMarkdown className="prose prose-sm max-w-none text-sm sm:text-base">{m.content}</ReactMarkdown>
                         )}
                       </div>
+                      {m.role === 'assistant' && (
+                        <Button
+                          onClick={() => speakText(m.content)}
+                          className="ml-2 bg-gray-200 hover:bg-gray-300 rounded-full p-1 sm:px-2 shadow-md"
+                        >
+                          <Volume2 className="w-4 h-4 sm:w-5 sm:h-5 text-gray-600" />
+                        </Button>
+                      )}
                     </div>
                   ))}
                   {isLoading && (
-                    <div className="flex items-center gap-2 text-[#329fda] p-3">
-                      <RotateCw className="w-5 h-5 animate-spin" />
-                      <span className="font-medium">Generando respuesta...</span>
+                    <div className="flex items-center gap-2 text-[#329fda] p-2 sm:p-3">
+                      <RotateCw className="w-4 h-4 sm:w-5 sm:h-5 animate-spin" />
+                      <span className="font-medium text-sm sm:text-base">Generando respuesta...</span>
                     </div>
                   )}
                 </div>
-  
-                <form onSubmit={handleSubmit} className="p-4 border-t border-gray-100 bg-gray-50 rounded-b-3xl">
-                  <div className="flex gap-2 bg-white p-3 rounded-full shadow-md">
+
+                {/* Chat input */}
+                <form onSubmit={handleSubmit} className="p-2 sm:p-4 border-t border-gray-100 bg-gray-50 rounded-b-3xl">
+                  <div className="flex gap-2 bg-white p-2 sm:p-3 rounded-full shadow-md">
                     <Input
                       value={input}
                       onChange={(e) => setInput(e.target.value)}
                       placeholder="Escribe tu pregunta aquí..."
-                      className="flex-1 border-0 bg-transparent focus:ring-0 placeholder-gray-900 text-gray-900"
+                      className="flex-1 border-0 bg-transparent focus:ring-0 placeholder-gray-900 text-gray-900 text-sm sm:text-base"
                       disabled={isLoading}
                     />
                     <Button
                       type="submit"
                       disabled={isLoading}
-                      className="bg-[#329fda] hover:bg-[#0077BE] text-white rounded-full px-4 shadow-md"
+                      className="bg-[#329fda] hover:bg-[#0077BE] text-white rounded-full px-3 sm:px-4 shadow-md"
                     >
-                      <Send className="w-5 h-5" />
-                    </Button>
-                    <Button onClick={handleClearChat} className="bg-gray-200 hover:bg-gray-300 rounded-full px-4 shadow-md">
-                      <Trash2 className="w-5 h-5 text-gray-600" />
-                    </Button>
-                    <Button onClick={toggleHistory} className="bg-gray-200 hover:bg-gray-300 rounded-full px-4 shadow-md">
-                      <History className="w-5 h-5 text-gray-600" />
+                      <Send className="w-4 h-4 sm:w-5 sm:h-5" />
                     </Button>
                   </div>
                 </form>
               </div>
             </div>
-  
-            <div className="lg:w-[600px] bg-white rounded-3xl shadow-lg border border-gray-200 overflow-hidden">
-              <div className="bg-[#329fda] p-4">
-                <h2 className="text-white font-medium text-lg">Video Demostrativo</h2>
+
+            {/* Video container */}
+            <div className="lg:w-[600px] bg-white rounded-2xl sm:rounded-3xl shadow-lg border border-gray-200 overflow-hidden">
+              <div className="bg-[#329fda] p-3 sm:p-4">
+                <h2 className="text-white font-medium text-base sm:text-lg">Video Demostrativo</h2>
               </div>
-              <div className="p-4">
+              <div className="p-2 sm:p-4">
                 {videoId && videoId !== "NULL" && videoId !== "EMPTY" ? (
                   <div className="aspect-video rounded-xl overflow-hidden shadow-lg">
                     <VideoPlayer videoId={videoId} />
                   </div>
                 ) : (
                   <div className="aspect-video flex flex-col items-center justify-center border-2 border-dashed border-gray-200 rounded-xl text-gray-500 bg-gray-50">
-                    <img src="/imagenes/bermal-logo.png" alt="Bermal Logo" className="w-16 h-16 mb-4 opacity-50" />
-                    <p className="text-center">
-                    {preguntaRealizada ? "No hay video demostrativo disponible para este tema." : "Haz una pregunta para ver un video relacionado."}
+                    <img src="/imagenes/bermal-logo.png" alt="Bermal Logo" className="w-12 h-12 sm:w-16 sm:h-16 mb-3 sm:mb-4 opacity-50" />
+                    <p className="text-center text-sm sm:text-base">
+                      {preguntaRealizada ? "No hay video demostrativo disponible para este tema." : "Haz una pregunta para ver un video relacionado."}
                     </p>
                   </div>
                 )}
@@ -333,20 +473,21 @@ export default function ChatBot() {
           </div>
         )}
       </main>
-  
+
+      {/* Modal de historial responsivo */}
       {isHistoryVisible && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50">
-          <div className="bg-white rounded-lg p-6 w-96 max-h-[80vh] overflow-y-auto shadow-lg">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50 p-4">
+          <div className="bg-white rounded-lg p-4 sm:p-6 w-full max-w-[90%] sm:max-w-md max-h-[80vh] overflow-y-auto shadow-lg">
             <h2 className="text-lg font-semibold text-gray-800 mb-4">Historial de Preguntas</h2>
-            <ul className="space-y-4">
+            <ul className="space-y-3 sm:space-y-4">
               {history.map((item, index) => (
                 <li
                   key={index}
-                  className="cursor-pointer hover:bg-gray-100 p-3 rounded-lg transition-colors"
+                  className="cursor-pointer hover:bg-gray-100 p-2 sm:p-3 rounded-lg transition-colors"
                   onClick={() => handleHistoryClick(item)}
                 >
                   <div className="flex justify-between items-center">
-                    <div className="text-sm font-medium text-gray-700">{item.question}</div>
+                    <div className="text-xs sm:text-sm font-medium text-gray-700">{item.question}</div>
                     <button
                       onClick={(e) => {
                         e.stopPropagation()
@@ -367,5 +508,5 @@ export default function ChatBot() {
         </div>
       )}
     </div>
-  )
-}
+  );
+};
