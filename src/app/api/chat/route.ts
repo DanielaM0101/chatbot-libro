@@ -24,7 +24,7 @@ export async function POST(req: Request) {
     const { messages } = await req.json()
     const lastMessage = messages[messages.length - 1].content.toLowerCase()
 
-    console.log('Fetching book content...')
+    
     const { data: bookContent, error } = await supabase
       .from('book_content')
       .select('*')
@@ -34,7 +34,7 @@ export async function POST(req: Request) {
       return new Response(JSON.stringify({ error: 'Error fetching book content' }), { status: 500 })
     }
 
-    console.log('Processing book content...')
+    
     let videoId = null
     let relevantContent = ''
 
@@ -43,7 +43,7 @@ export async function POST(req: Request) {
     }
 
     const cleanedMessage = prepareText(lastMessage)
-    console.log('Cleaned message:', cleanedMessage)
+    
 
     const searchableContent = bookContent.map(topic => ({
       topic: topic.topic,
@@ -59,25 +59,25 @@ export async function POST(req: Request) {
       limit: 5
     })
 
-    console.log('Fuzzy search results:', searchResults.length)
+    
 
     for (const result of searchResults) {
       const topic = result.obj
-      console.log('Matched topic:', topic.topic)
+      
       relevantContent += `${topic.topic}:\n${topic.content}\n\n`
       
       if (!videoId && topic.videoId && topic.videoId !== 'NULL' && topic.videoId !== 'EMPTY') {
         videoId = topic.videoId
-        console.log('Found video ID:', videoId)
+        
       }
     }
 
     if (!relevantContent) {
-      console.log('No specific content found, using all book content')
+      
       relevantContent = bookContent.map(topic => `${topic.topic}:\n${topic.content}\n\n`).join('')
     }
 
-    console.log('Preparing prompt...')
+    
     const systemMessage = `Eres un asistente experto en primeros auxilios basado en el libro "Auxilio al Instante: Técnicas de Respuesta Rápida". 
 
 Información disponible del libro:
@@ -99,7 +99,7 @@ Instrucciones de contenido:
 4. Siempre enfatiza la importancia de buscar ayuda profesional en situaciones de emergencia.
 5. Si la pregunta no está relacionada con primeros auxilios, indica amablemente que tu conocimiento se limita a ese tema.`
 
-    console.log('Sending request to OpenAI...')
+    
     const response = await openai.createChatCompletion({
       model: 'gpt-3.5-turbo',
       messages: [
@@ -114,7 +114,7 @@ Instrucciones de contenido:
       return new Response(JSON.stringify({ error: `Error generating response: ${response.status} ${response.statusText}` }), { status: 500 })
     }
 
-    console.log('Processing OpenAI response...')
+    
     const result = await response.json()
     let aiResponse = result.choices[0]?.message?.content || "Lo siento, no pude generar una respuesta.";
 
