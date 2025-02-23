@@ -146,13 +146,13 @@ export default function ChatBot() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!input.trim() || isLoading) return
-
+  
     const userMessage: Message = { role: 'user', content: input }
     setMessages((prevMessages) => [...prevMessages, userMessage])
     setInput('')
     setError(null)
     setIsLoading(true)
-
+  
     try {
       const response = await fetch('/api/chat', {
         method: 'POST',
@@ -161,21 +161,24 @@ export default function ChatBot() {
         },
         body: JSON.stringify({ messages: [...messages, userMessage] }),
       })
-
+  
       const data = await response.json()
-
+  
       if (!response.ok) {
         throw new Error(data.error || 'Error en la respuesta del servidor')
       }
-
+  
       const category = determineCategory(input, data.content)
       const relatedToFirstAid = category !== 'Otros'
-
+  
+      
+      const validVideoId = data.videoId && data.videoId !== "NULL" && data.videoId !== "EMPTY"
+      setVideoId(relatedToFirstAid && validVideoId ? data.videoId : null)
+  
       setMessages((prevMessages) => [...prevMessages, { role: 'assistant', content: data.content }])
-      setVideoId(relatedToFirstAid && data.videoId ? data.videoId : null)
-
+  
       updateStats(input, data.content)
-
+  
       const now = Date.now()
       setHistory((prevHistory) => [
         ...prevHistory.filter((item) => now - item.timestamp <= HISTORY_EXPIRATION_TIME),
@@ -183,7 +186,7 @@ export default function ChatBot() {
           question: input,
           answer: data.content,
           timestamp: now,
-          videoId: relatedToFirstAid ? data.videoId : null,
+          videoId: relatedToFirstAid && validVideoId ? data.videoId : null,
           category: category,
         },
       ])
